@@ -16,7 +16,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2  # Ensure previous commit is available for comparison
+          fetch-depth: 2  # Ensures previous commit is available for comparison
 
       - name: Set Up Python
         uses: actions/setup-python@v4
@@ -25,7 +25,6 @@ jobs:
           
       - name: Install Dependencies
         run: pip install -r requirements.txt
-
 
       - name: Load Environment Variables
         run: echo "GITHUB_TOKEN=${{ secrets.AUTO_COMMENT_TOKEN }}" > .env
@@ -39,34 +38,46 @@ jobs:
             PREV_COMMIT=$(git rev-list --max-parents=0 HEAD)  # First commit in repo
           fi
           LAST_COMMIT=$(git rev-parse HEAD)
-          
+
           # Get list of changed Java files
-          CHANGED_FILES=$(git diff --name-only $PREV_COMMIT $LAST_COMMIT -- '*.java')
-          
+          CHANGED_FILES=$(git diff --name-only "$PREV_COMMIT" "$LAST_COMMIT" -- '*.java')
+
           if [[ -z "$CHANGED_FILES" ]]; then
             echo "No Java files changed."
-            echo "changed_files=" >> $GITHUB_ENV
+            echo "changed_files=" >> "$GITHUB_ENV"
           else
-            echo "Modified Java files: $CHANGED_FILES"
-            echo "changed_files=$CHANGED_FILES" >> $GITHUB_ENV
+            echo "Modified Java files:"
+            echo "$CHANGED_FILES"
+            
+            # Correctly set environment variable with multiple lines
+            {
+              echo "changed_files<<EOF"
+              echo "$CHANGED_FILES"
+              echo "EOF"
+            } >> "$GITHUB_ENV"
           fi
 
       - name: Run Auto Comment Script
         run: |
           if [[ -n "${{ env.changed_files }}" ]]; then
-            for file in ${{ env.changed_files }}; do
+            echo "Processing Java files..."
+            while IFS= read -r file; do
+              echo "Processing: $file"
               python auto_comment.py "$file"
-            done
+            done <<< "${{ env.changed_files }}"
           else
             echo "No Java files to process."
           fi
 
-      - name: Commit Changes
+      - name: Commit & Push Changes
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add .
-          git commit -m "Auto-commented Java files" || echo "No changes to commit"
-          git push
-        env:
-          GITHUB_TOKEN: ${{ secrets.AUTO_COMMENT_TOKEN }}
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "Auto-commented Java files"
+            git push
+          fi
