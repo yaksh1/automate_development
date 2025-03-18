@@ -29,7 +29,7 @@ jobs:
       - name: Load Environment Variables
         run: echo "GITHUB_TOKEN=${{ secrets.AUTO_COMMENT_TOKEN }}" > .env
 
-      - name: Find Modified Java Files
+      - name: Find Modified Java Files (Exclude Deleted & Test Files)
         id: changed_files
         run: |
           if git rev-parse HEAD~1 >/dev/null 2>&1; then
@@ -39,20 +39,29 @@ jobs:
           fi
           LAST_COMMIT=$(git rev-parse HEAD)
 
-          # Get list of changed Java files
-          CHANGED_FILES=$(git diff --name-only "$PREV_COMMIT" "$LAST_COMMIT" -- '*.java')
+          # Get list of changed Java files (excluding deleted)
+          CHANGED_FILES=$(git diff --name-only --diff-filter=d "$PREV_COMMIT" "$LAST_COMMIT" -- '*.java')
 
-          if [[ -z "$CHANGED_FILES" ]]; then
-            echo "No Java files changed."
+          FILTERED_FILES=""
+          for file in $CHANGED_FILES; do
+            if [[ "$file" =~ [Tt][Ee][Ss][Tt] ]]; then
+              echo "Skipping test file: $file"
+            else
+              FILTERED_FILES+="$file"$'\n'
+            fi
+          done
+
+          if [[ -z "$FILTERED_FILES" ]]; then
+            echo "No valid Java files to process."
             echo "changed_files=" >> "$GITHUB_ENV"
           else
             echo "Modified Java files:"
-            echo "$CHANGED_FILES"
+            echo "$FILTERED_FILES"
             
-            # Correctly set environment variable with multiple lines
+            # Set environment variable correctly with multiple lines
             {
               echo "changed_files<<EOF"
-              echo "$CHANGED_FILES"
+              echo "$FILTERED_FILES"
               echo "EOF"
             } >> "$GITHUB_ENV"
           fi
@@ -62,8 +71,12 @@ jobs:
           if [[ -n "${{ env.changed_files }}" ]]; then
             echo "Processing Java files..."
             while IFS= read -r file; do
-              echo "Processing: $file"
-              python auto_comment.py "$file"
+              if [[ -f "$file" ]]; then  # Skip deleted files
+                echo "Processing: $file"
+                python auto_comment.py "$file"
+              else
+                echo "Skipping deleted file: $file"
+              fi
             done <<< "${{ env.changed_files }}"
           else
             echo "No Java files to process."
